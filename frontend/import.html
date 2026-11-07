@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>上传花名册</title>
+<link rel="stylesheet" href="/css/base.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="title">上传花名册</div>
+  <div class="sub">Excel 需含：学号、姓名（电话可选）</div>
+</div>
+<div class="offline-bar"></div>
+<div class="container">
+  <div class="card">
+    <label class="label">选择 Excel 文件（.xlsx / .xls）</label>
+    <input type="file" id="file" accept=".xlsx,.xls">
+    <button class="btn btn-primary btn-block mt" id="btnPreview">预览</button>
+    <button class="btn btn-outline btn-block mt" id="btnTemplate">下载导入模板</button>
+  </div>
+  <div id="result"></div>
+  <a class="muted" href="/attendance.html?class_id=" id="back">← 返回点名页</a>
+</div>
+<script src="/js/api.js?v=2"></script>
+<script src="/js/storage.js?v=2"></script>
+<script>
+const classId = parseInt(new URLSearchParams(location.search).get('class_id') || '0');
+document.getElementById('back').href = `/attendance.html?class_id=${classId}`;
+let storedPath = null;
+
+document.getElementById('btnTemplate').onclick = () => {
+  const token = API.getToken();
+  location.href = `/api/classes/${classId}/students/template?token=${encodeURIComponent(token)}`;
+};
+
+document.getElementById('btnPreview').onclick = async () => {
+  const f = document.getElementById('file').files[0];
+  const box = document.getElementById('result');
+  box.innerHTML = '';
+  if (!f) { box.innerHTML = '<div class="alert alert-error">请先选择文件</div>'; return; }
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const token = API.getToken();
+    const resp = await fetch(`/api/classes/${classId}/students/import/preview`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token },
+      body: fd,
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.code !== 0) throw new Error(data.detail || data.message);
+    storedPath = data.data.stored_path;
+    const pv = data.data.preview;
+    let html = `<div class="alert alert-${pv.error_count?'warn':'ok'}">
+      共 ${pv.total_rows} 行，有效 ${pv.valid_count} 行，错误 ${pv.error_count} 行
+    </div>`;
+    html += '<div class="card"><div class="label">前 10 行预览</div>';
+    html += '<div style="font-size:13px;max-height:300px;overflow:auto;">';
+    pv.rows.slice(0, 10).forEach(r => {
+      const err = r.errors.length ? `<span style="color:#c62828">（${r.errors.join('，')}）</span>` : '';
+      html += `<div>${r.student_number || '-'} ｜ ${r.name || '-'} ｜ ${r.phone || '-'} ${err}</div>`;
+    });
+    html += '</div></div>';
+    html += `<button class="btn btn-success btn-block" id="btnConfirm">确认导入 ${pv.valid_count} 名学生</button>`;
+    html += '<div class="muted mt">确认后旧学生名单将被替换（历史记录保留）。</div>';
+    box.innerHTML = html;
+    document.getElementById('btnConfirm').onclick = confirmImport;
+  } catch (e) {
+    box.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+};
+
+async function confirmImport() {
+  try {
+    const r = await API.post(`/api/classes/${classId}/students/import/confirm`, { stored_path: storedPath });
+    document.getElementById('result').innerHTML = `<div class="alert alert-ok">
+      导入完成：新增 ${r.data.imported} 人，替换 ${r.data.deactivated} 人。
+      <a href="/attendance.html?class_id=${classId}">返回点名页</a></div>`;
+  } catch (e) {
+    document.getElementById('result').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+}
+</script>
+</body>
+</html>

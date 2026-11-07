@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>历史记录</title>
+<link rel="stylesheet" href="/css/base.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="title">历史点名</div>
+  <div class="sub">按时间倒序</div>
+</div>
+<div class="offline-bar"></div>
+<div class="container">
+  <div class="row mb">
+    <input type="date" id="from">
+    <input type="date" id="to">
+    <button class="btn" id="btnQuery">查询</button>
+  </div>
+  <div id="list"><div class="card">加载中…</div></div>
+  <a class="muted" href="/attendance.html?class_id=" id="back">← 返回点名页</a>
+</div>
+<script src="/js/api.js?v=2"></script>
+<script src="/js/storage.js?v=2"></script>
+<script>
+const classId = parseInt(new URLSearchParams(location.search).get('class_id') || '0');
+document.getElementById('back').href = `/attendance.html?class_id=${classId}`;
+
+async function load() {
+  const from = document.getElementById('from').value;
+  const to = document.getElementById('to').value;
+  let q = `?`;
+  if (from) q += `date_from=${from}&`;
+  if (to) q += `date_to=${to}&`;
+  const r = await API.get(`/api/classes/${classId}/attendance/sessions${q}`);
+  const box = document.getElementById('list');
+  if (!r.data || !r.data.length) {
+    box.innerHTML = '<div class="alert alert-info">暂无点名记录</div>';
+    return;
+  }
+  box.innerHTML = '';
+  r.data.forEach(s => {
+    const d = s.started_at ? new Date(s.started_at) : new Date(s.created_at);
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.cssText = 'display:flex;justify-content:space-between;align-items:center;';
+    card.innerHTML = `
+      <a href="/history_detail.html?session_id=${s.session_id}" style="flex:1;color:inherit;text-decoration:none;">
+        <div style="font-size:16px;font-weight:600;">${d.toLocaleString('zh-CN')} ${s.status==='active'?'<span class="alert-warn" style="padding:2px 6px;border-radius:4px;">进行中</span>':''}</div>
+        <div class="muted mt">共 ${s.summary.total} ｜ 已到 ${s.summary.present} ｜ 迟到 ${s.summary.late} ｜ 已请假 ${s.summary.sick_leave} ｜ 其他 ${s.summary.other} ｜ 未点名 ${s.summary.pending}</div>
+      </a>
+      <div style="display:flex;gap:6px;margin-left:10px;flex-shrink:0;">
+        <a class="btn btn-primary" href="/history_detail.html?session_id=${s.session_id}" style="font-size:13px;padding:6px 12px;text-decoration:none;">查看/修改</a>
+        <button class="btn btn-danger" data-del="${s.session_id}" style="font-size:13px;padding:6px 12px;">删除</button>
+      </div>`;
+    box.appendChild(card);
+  });
+  // 绑定删除事件
+  box.querySelectorAll('[data-del]').forEach(btn => {
+    btn.onclick = () => deleteSession(parseInt(btn.dataset.del));
+  });
+}
+
+function deleteSession(sessionId) {
+  const pwd = prompt('删除记录需要验证，请输入班级密码：');
+  if (pwd === null) return;
+  if (!pwd) { alert('请输入密码'); return; }
+  fetch(`/api/attendance/${sessionId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': 'Bearer ' + API.getToken(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ password: pwd })
+  }).then(async r => {
+    if (!r.ok) {
+      const j = await r.json();
+      throw new Error(j.detail || j.message || '删除失败');
+    }
+    alert('删除成功');
+    load();
+  }).catch(e => alert(e.message));
+}
+document.getElementById('btnQuery').onclick = load;
+load().catch(e => { document.getElementById('list').innerHTML = `<div class="alert alert-error">${e.message}</div>`; });
+</script>
+</body>
+</html>

@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>点名</title>
+<link rel="stylesheet" href="/css/base.css">
+<style>
+  .status-bar { background:#fff; padding:10px 14px; border-bottom:1px solid var(--c-border); font-size:13px; }
+  .status-bar.fixed { position:fixed; top:0; left:0; right:0; z-index:10; }
+  .status-bar .nums { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+  .status-bar .nums span { padding:2px 8px; border-radius:6px; background:#f0f0f0; }
+  .student-card { background:#fff; border-radius:var(--radius); padding:12px; margin-bottom:10px; box-shadow:var(--shadow); }
+  .student-head { display:flex; justify-content:space-between; align-items:baseline; }
+  .student-num { font-family: ui-monospace, Menlo, Consolas, monospace; color:var(--c-sub); font-size:13px; white-space:nowrap; }
+  .student-name { font-size:18px; font-weight:600; white-space:nowrap; }
+  .student-phone { font-size:13px; color:var(--c-sub); margin-top:2px; }
+  .status-btns { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:10px; }
+  .sbtn { min-height:44px; border:1.5px solid var(--c-border); background:#fafafa; border-radius:8px; font-size:14px; cursor:pointer; padding:4px 2px; }
+  .sbtn.present.on { background:var(--c-present); color:#fff; border-color:var(--c-present); }
+  .sbtn.late.on { background:var(--c-late); color:#fff; border-color:var(--c-late); }
+  .sbtn.sick_leave.on { background:var(--c-sick); color:#fff; border-color:var(--c-sick); }
+  .sbtn.other.on { background:var(--c-other); color:#fff; border-color:var(--c-other); }
+  .remark-box { margin-top:8px; display:none; }
+  .remark-box.show { display:block; }
+  .remark-box textarea { font-size:14px; }
+  .toolbar { background:var(--c-bg); padding:8px 12px; }
+  .filter-row { display:flex; gap:6px; overflow-x:auto; padding:4px 0; }
+  .chip { flex:0 0 auto; padding:6px 12px; border-radius:16px; background:#fff; border:1px solid var(--c-border); font-size:13px; cursor:pointer; }
+  .chip.on { background:var(--c-primary); color:#fff; border-color:var(--c-primary); }
+  .finish-bar { position:fixed; bottom:0; left:0; right:0; padding:8px 10px calc(8px + env(safe-area-inset-bottom)); background:#fff; border-top:1px solid var(--c-border); }
+  .finish-bar .inner { max-width:720px; margin:0 auto; }
+  .body-pad { padding-bottom:110px; }
+  @media (max-width: 400px) {
+    .student-name { font-size:16px; }
+    .sbtn { font-size:13px; min-height:42px; }
+    .status-bar { font-size:12px; padding:8px 10px; }
+    .chip { font-size:12px; padding:5px 10px; }
+  }
+  .done-banner { background:#e8f5e9; border-radius:var(--radius); padding:16px; margin-bottom:10px; }
+  .pending-mask {
+    display:none; position:fixed; inset:0; z-index:100;
+    background:rgba(0,0,0,.45);
+    align-items:center; justify-content:center; padding:20px;
+  }
+  .pending-mask.show { display:flex; }
+  .pending-dialog {
+    background:#fff; border-radius:14px; padding:24px 20px; max-width:360px; width:100%;
+    box-shadow:0 8px 30px rgba(0,0,0,.2); text-align:center;
+  }
+  .pending-dialog .icon { font-size:36px; margin-bottom:8px; }
+  .pending-dialog .title { font-size:18px; font-weight:600; margin-bottom:6px; }
+  .pending-dialog .desc { font-size:14px; color:var(--c-sub); margin-bottom:18px; }
+  .pending-dialog .row { gap:10px; }
+  .toast {
+    position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
+    background: rgba(31, 35, 41, 0.9); color: #fff;
+    padding: 10px 18px; border-radius: 20px; font-size: 14px;
+    z-index: 200; opacity: 0; pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(4px); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="title" id="clsName">点名</div>
+  <div class="sub" id="dateStr"></div>
+</div>
+<div class="offline-bar"></div>
+
+<div class="status-bar">
+  <div>本次点名：<span id="startTime">未开始</span> ｜ 当前：<span id="nowTime"></span></div>
+  <div class="nums" id="nums"></div>
+</div>
+
+<div class="toolbar">
+  <input type="search" id="search" placeholder="搜索学号 / 姓名 / 电话">
+  <div class="filter-row" id="filter">
+    <span class="chip on" data-f="all">全部</span>
+    <span class="chip" data-f="pending">未点名</span>
+    <span class="chip" data-f="present">已到</span>
+    <span class="chip" data-f="late">迟到</span>
+    <span class="chip" data-f="sick_leave">已请假</span>
+    <span class="chip" data-f="other">其他</span>
+  </div>
+</div>
+
+<div class="container body-pad">
+  <div id="doneBanner" class="done-banner" style="display:none;"></div>
+  <div id="list"></div>
+</div>
+
+<div class="pending-mask" id="pendingWarn">
+  <div class="pending-dialog">
+    <div class="icon">⚠️</div>
+    <div class="title">还有学生未完成</div>
+    <div class="desc" id="pendingText"></div>
+    <div class="row">
+      <button class="btn" id="btnContinue" style="flex:1;">继续点名</button>
+      <button class="btn btn-danger" id="btnForceFinish" style="flex:1;">仍然结束</button>
+    </div>
+  </div>
+</div>
+
+<div class="finish-bar">
+  <div class="inner">
+    <div class="row mb">
+      <a class="btn" href="/history.html?class_id=" id="navHistory">历史</a>
+      <a class="btn" href="/import.html?class_id=" id="navImport">花名册</a>
+      <a class="btn" href="/export.html?class_id=" id="navExport">导出</a>
+    </div>
+    <button class="btn btn-danger btn-block" id="btnFinish">结束本次点名</button>
+  </div>
+</div>
+
+<script src="/js/api.js?v=3"></script>
+<script src="/js/storage.js?v=3"></script>
+<script>
+const params = new URLSearchParams(location.search);
+const classId = parseInt(params.get('class_id') || '0');
+let sessionId = null;
+let students = [];       // {id, student_number, name, phone, status, remark}
+let currentFilter = 'all';
+let searchKw = '';
+let finished = false;
+
+document.getElementById('navHistory').href = `/history.html?class_id=${classId}`;
+document.getElementById('navImport').href = `/import.html?class_id=${classId}`;
+document.getElementById('navExport').href = `/export.html?class_id=${classId}`;
+
+function fmt(d) {
+  function p(x){return String(x).padStart(2,'0');}
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function tick() {
+  document.getElementById('nowTime').textContent = fmt(new Date());
+}
+setInterval(tick, 1000); tick();
+document.getElementById('dateStr').textContent = new Date().toLocaleDateString('zh-CN');
+
+// 滚动固定统计栏
+const statusBar = document.querySelector('.status-bar');
+let statusBarPlaceholder = null;
+let statusBarOriginalOffset = null;
+function updateStatusBar() {
+  if (statusBarOriginalOffset === null && !statusBar.classList.contains('fixed')) {
+    statusBarOriginalOffset = statusBar.offsetTop;
+  }
+  if (window.scrollY >= statusBarOriginalOffset) {
+    if (!statusBar.classList.contains('fixed')) {
+      statusBarPlaceholder = document.createElement('div');
+      statusBarPlaceholder.style.height = statusBar.offsetHeight + 'px';
+      statusBarPlaceholder.style.width = '100%';
+      statusBar.parentNode.insertBefore(statusBarPlaceholder, statusBar);
+      statusBar.classList.add('fixed');
+    }
+  } else {
+    if (statusBar.classList.contains('fixed')) {
+      statusBar.classList.remove('fixed');
+      if (statusBarPlaceholder) {
+        statusBarPlaceholder.parentNode.removeChild(statusBarPlaceholder);
+        statusBarPlaceholder = null;
+      }
+    }
+  }
+}
+window.addEventListener('scroll', updateStatusBar);
+window.addEventListener('resize', updateStatusBar);
+
+async function boot() {
+  const cls = API.getClass();
+  if (cls) document.getElementById('clsName').textContent = cls.class_name;
+  // 学生
+  const sr = await API.get(`/api/classes/${classId}/students`);
+  students = (sr.data || []).map(s => Object.assign({}, s, { status: 'pending', remark: null }));
+  // 活跃 session
+  const ar = await API.get(`/api/classes/${classId}/attendance/active`);
+  if (ar.data) {
+    sessionId = ar.data.session_id;
+    document.getElementById('startTime').textContent = ar.data.started_at ? fmt(new Date(ar.data.started_at)) : '等待第一次记录';
+    // 加载已有记录
+    const dr = await API.get(`/api/attendance/${sessionId}`);
+    const recs = dr.data.records || [];
+    const m = {};
+    recs.forEach(r => m[r.student_id] = r);
+    students = students.map(s => {
+      const r = m[s.id];
+      return r ? Object.assign({}, s, { status: r.status, remark: r.remark }) : s;
+    });
+  } else {
+    // 创建新 session
+    const cr = await API.post(`/api/classes/${classId}/attendance/sessions`, {});
+    sessionId = cr.data.session_id;
+    document.getElementById('startTime').textContent = '等待第一次记录';
+  }
+  render();
+}
+
+function render() {
+  // 顶部统计
+  const counts = { total: students.length, present:0, late:0, sick_leave:0, other:0, pending:0 };
+  students.forEach(s => counts[s.status] = (counts[s.status]||0)+1);
+  const done = counts.total - counts.pending;
+  document.getElementById('nums').innerHTML = `
+    <span>总 ${counts.total}</span>
+    <span>已处理 ${done}/${counts.total}</span>
+    <span style="background:#e8f5e9">已到 ${counts.present}</span>
+    <span style="background:#fff4e5">迟到 ${counts.late}</span>
+    <span style="background:#e3f2fd">已请假 ${counts.sick_leave}</span>
+    <span style="background:#f3e5f5">其他 ${counts.other}</span>
+    <span style="background:#f0f0f0">未点名 ${counts.pending}</span>`;
+
+  // 列表
+  const box = document.getElementById('list');
+  box.innerHTML = '';
+  const kw = searchKw.toLowerCase();
+  students.filter(s => {
+    if (currentFilter !== 'all' && s.status !== currentFilter) return false;
+    if (kw && !(s.student_number.toLowerCase().includes(kw) || s.name.toLowerCase().includes(kw) || (s.phone||'').includes(kw))) return false;
+    return true;
+  }).forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'student-card';
+    card.innerHTML = `
+      <div class="student-head">
+        <span class="student-name">${s.name}</span>
+        <span class="student-num">${s.student_number}</span>
+      </div>
+      ${s.phone ? `<div class="student-phone">电话：${s.phone}</div>` : ''}
+      <div class="status-btns">
+        <button class="sbtn present ${s.status==='present'?'on':''}" data-id="${s.id}" data-st="present">已到</button>
+        <button class="sbtn late ${s.status==='late'?'on':''}" data-id="${s.id}" data-st="late">迟到</button>
+        <button class="sbtn sick_leave ${s.status==='sick_leave'?'on':''}" data-id="${s.id}" data-st="sick_leave">已请假</button>
+        <button class="sbtn other ${s.status==='other'?'on':''}" data-id="${s.id}" data-st="other">其他</button>
+      </div>
+      <div class="remark-box ${s.status==='other'?'show':''}" data-rid="${s.id}">
+        <textarea placeholder="请输入具体情况，如：事假 / 参加比赛" data-rm="${s.id}">${s.remark||''}</textarea>
+        <button class="btn btn-primary mt" data-rsave="${s.id}" style="display:none;">保存备注</button>
+      </div>`;
+    box.appendChild(card);
+  });
+
+  // 绑定事件
+  box.querySelectorAll('.sbtn').forEach(btn => {
+    btn.onclick = () => setStatus(parseInt(btn.dataset.id), btn.dataset.st);
+  });
+  box.querySelectorAll('[data-rsave]').forEach(btn => {
+    btn.onclick = () => saveRemark(parseInt(btn.dataset.rsave));
+  });
+  // 备注框：点击输入框显示保存按钮
+  box.querySelectorAll('[data-rm]').forEach(ta => {
+    ta.addEventListener('focus', () => {
+      const btn = ta.parentElement.querySelector('[data-rsave]');
+      if (btn) btn.style.display = '';
+    });
+    ta.addEventListener('input', () => {
+      const btn = ta.parentElement.querySelector('[data-rsave]');
+      if (btn) btn.style.display = '';
+    });
+  });
+}
+
+async function setStatus(studentId, st) {
+  const s = students.find(x => x.id === studentId);
+  if (!s || finished) return;
+  // 乐观更新
+  const old = s.status;
+  s.status = st;
+  if (st !== 'other') s.remark = null;
+  render();
+  try {
+    const r = await API.post(`/api/attendance/${sessionId}/record`, {
+      student_id: studentId, status: st, remark: st === 'other' ? (s.remark || null) : null
+    });
+    if (r.data && r.data.session && r.data.session.started_at) {
+      document.getElementById('startTime').textContent = fmt(new Date(r.data.session.started_at));
+    }
+  } catch (e) {
+    s.status = old;
+    render();
+    OfflineQueue.push({ kind: 'record', student_id: studentId, status: st, remark: st==='other'?s.remark:null });
+    OfflineQueue.render();
+  }
+}
+
+async function saveRemark(studentId) {
+  const s = students.find(x => x.id === studentId);
+  const ta = document.querySelector(`[data-rm="${studentId}"]`);
+  if (!s || !ta) return;
+  s.remark = ta.value.trim();
+  try {
+    await API.post(`/api/attendance/${sessionId}/record`, {
+      student_id: studentId, status: 'other', remark: s.remark || null
+    });
+    // 保存成功后隐藏按钮
+    const btn = ta.parentElement.querySelector('[data-rsave]');
+    if (btn) btn.style.display = 'none';
+  } catch (e) {
+    OfflineQueue.push({ kind: 'record', student_id: studentId, status: 'other', remark: s.remark });
+  }
+}
+
+// Toast 提示函数
+function showToast(msg, dur = 2500) {
+  let t = document.getElementById('appToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'appToast';
+    t.className = 'toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), dur);
+}
+
+// 结束点名
+const btnFinish = document.getElementById('btnFinish');
+btnFinish.onclick = async () => {
+  if (finished) return;
+  const origText = btnFinish.textContent;
+  btnFinish.disabled = true;
+  btnFinish.textContent = '正在结束...';
+  try {
+    const r = await API.post(`/api/attendance/${sessionId}/finish`, { force: false });
+    if (r.code === 1001) {
+      document.getElementById('pendingText').textContent = r.message;
+      document.getElementById('pendingWarn').classList.add('show');
+      btnFinish.disabled = false;
+      btnFinish.textContent = origText;
+      return;
+    }
+    showDone(r.data.summary);
+  } catch (e) {
+    showToast(e.message || '结束失败');
+    btnFinish.disabled = false;
+    btnFinish.textContent = origText;
+  }
+};
+
+document.getElementById('btnContinue').onclick = () => {
+  document.getElementById('pendingWarn').classList.remove('show');
+};
+
+const btnForce = document.getElementById('btnForceFinish');
+btnForce.onclick = async () => {
+  const origText = btnForce.textContent;
+  btnForce.disabled = true;
+  btnForce.textContent = '正在处理...';
+  try {
+    const r = await API.post(`/api/attendance/${sessionId}/finish`, { force: true });
+    showDone(r.data.summary);
+  } catch (e) {
+    showToast(e.message || '结束失败');
+  } finally {
+    btnForce.disabled = false;
+    btnForce.textContent = origText;
+  }
+};
+
+function showDone(sum) {
+  finished = true;
+  btnFinish.disabled = true;
+  btnFinish.textContent = '点名已结束';
+  document.getElementById('pendingWarn').classList.remove('show');
+  const b = document.getElementById('doneBanner');
+  const dur = sum.finished_at && sum.started_at
+    ? Math.round((new Date(sum.finished_at) - new Date(sum.started_at))/1000) : 0;
+  const mm = Math.floor(dur/60), ss = dur%60;
+  b.style.display = 'block';
+  b.innerHTML = `
+    <h3 style="margin:0 0 8px;color:var(--c-present);">✓ 本次点名已完成</h3>
+    <div>开始：${new Date(sum.started_at).toLocaleString('zh-CN')}</div>
+    <div>结束：${new Date(sum.finished_at).toLocaleString('zh-CN')}</div>
+    <div>耗时：${mm}分${ss}秒</div>
+    <div class="mt">总 ${sum.total} ｜ 已到 ${sum.present} ｜ 迟到 ${sum.late} ｜ 已请假 ${sum.sick_leave} ｜ 其他 ${sum.other} ｜ 未点名 ${sum.pending}</div>
+    <div class="row mt">
+      <a class="btn" href="/history_detail.html?session_id=${sessionId}">查看/修改本次</a>
+      <button class="btn btn-primary" id="exportBtn">导出 Excel</button>
+    </div>
+    <div class="row mt">
+      <button class="btn btn-success" id="btnNext">开始下一次</button>
+      <a class="btn" href="/history.html?class_id=${classId}">返回历史</a>
+    </div>`;
+  document.getElementById('exportBtn').onclick = () => downloadExport(`/api/attendance/${sessionId}/export`);
+  document.getElementById('btnNext').onclick = async () => {
+    location.href = `/attendance.html?class_id=${classId}&_=${Date.now()}`;
+  };
+
+  // 提示反馈并自动平滑回到顶部
+  showToast('✓ 本次点名已结束');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function downloadExport(url, method = 'GET', body = null) {
+  const btn = document.getElementById('exportBtn');
+  const token = API.getToken();
+  if (btn) { btn.textContent = '正在下载...'; btn.disabled = true; }
+  if (method === 'GET') {
+    location.href = url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+  } else {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = url;
+    const tk = document.createElement('input');
+    tk.name = 'token'; tk.value = token;
+    form.appendChild(tk);
+    for (const [k, v] of Object.entries(body || {})) {
+      const i = document.createElement('input');
+      i.name = k; i.value = typeof v === 'object' ? JSON.stringify(v) : v;
+      form.appendChild(i);
+    }
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+  }
+  setTimeout(() => {
+    if (btn) { btn.textContent = '导出 Excel'; btn.disabled = false; }
+  }, 2000);
+}
+
+// 搜索筛选
+document.getElementById('search').addEventListener('input', e => { searchKw = e.target.value; render(); });
+document.getElementById('filter').querySelectorAll('.chip').forEach(c => {
+  c.onclick = () => {
+    document.querySelectorAll('#filter .chip').forEach(x => x.classList.remove('on'));
+    c.classList.add('on');
+    currentFilter = c.dataset.f; render();
+  };
+});
+
+// 离线重发
+window.__offlineSender = async (op) => {
+  if (op.kind === 'record') {
+    await API.post(`/api/attendance/${sessionId}/record`, op);
+  }
+};
+
+boot().catch(e => {
+  document.getElementById('list').innerHTML = `<div class="alert alert-error">加载失败：${e.message}</div>`;
+});
+</script>
+</body>
+</html>

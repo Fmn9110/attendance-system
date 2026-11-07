@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>班级登录</title>
+<link rel="stylesheet" href="/css/base.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="title" id="clsName">班级登录</div>
+  <div class="sub">请输入班级密码</div>
+  <button class="btn" id="btnChangePwd" style="position:absolute;top:12px;right:12px;font-size:13px;padding:6px 12px;">修改密码</button>
+</div>
+<div class="offline-bar"></div>
+<div class="container">
+  <div class="card mt">
+    <div id="err" class="alert alert-error" style="display:none;"></div>
+    <label class="label">班级密码</label>
+    <input type="password" id="pwd" placeholder="请输入密码" autocomplete="current-password">
+    <button class="btn btn-primary btn-block mt" id="btn">登 录</button>
+    <a class="muted mt" href="/index.html" style="display:block;text-align:center;">← 返回选择班级</a>
+  </div>
+</div>
+<script src="/js/api.js?v=2"></script>
+<script src="/js/storage.js?v=2"></script>
+
+<!-- 修改密码弹窗 -->
+<div class="pending-mask" id="pwdMask" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.45);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:14px;padding:24px 20px;max-width:360px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.2);">
+    <h3 style="margin:0 0 16px;text-align:center;">修改密码</h3>
+    <div id="pwdErr" class="alert alert-error" style="display:none;margin-bottom:12px;"></div>
+    <label class="label">原始密码</label>
+    <input type="password" id="oldPwd" placeholder="请输入原始密码">
+    <label class="label mt">新密码（至少4位）</label>
+    <input type="password" id="newPwd1" placeholder="请输入新密码">
+    <label class="label mt">确认新密码</label>
+    <input type="password" id="newPwd2" placeholder="请再次输入新密码">
+    <div class="row mt">
+      <button class="btn" id="btnCancelPwd" style="flex:1;">取消</button>
+      <button class="btn btn-primary" id="btnConfirmPwd" style="flex:1;">确认修改</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const classId = parseInt(params.get('class_id') || '0');
+let className = '班级';
+
+(async () => {
+  try {
+    const r = await API.get('/api/classes');
+    const c = (r.data || []).find(x => x.id === classId);
+    if (c) { className = c.class_name; document.getElementById('clsName').textContent = className; }
+  } catch (e) {}
+})();
+
+document.getElementById('btn').onclick = async () => {
+  const pwd = document.getElementById('pwd').value;
+  const errEl = document.getElementById('err');
+  errEl.style.display = 'none';
+  if (!pwd) { errEl.textContent = '请输入密码'; errEl.style.display = 'block'; return; }
+  try {
+    const r = await API.post('/api/classes/login', { class_id: classId, password: pwd });
+    API.setToken(r.data.token, r.data.class_);
+    location.href = `/attendance.html?class_id=${classId}`;
+  } catch (e) {
+    errEl.textContent = e.message; errEl.style.display = 'block';
+  }
+};
+document.getElementById('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('btn').click(); });
+
+// 修改密码
+const mask = document.getElementById('pwdMask');
+document.getElementById('btnChangePwd').onclick = () => {
+  mask.style.display = 'flex';
+  document.getElementById('oldPwd').value = '';
+  document.getElementById('newPwd1').value = '';
+  document.getElementById('newPwd2').value = '';
+  document.getElementById('pwdErr').style.display = 'none';
+  document.getElementById('oldPwd').focus();
+};
+document.getElementById('btnCancelPwd').onclick = () => { mask.style.display = 'none'; };
+mask.addEventListener('click', e => { if (e.target === mask) mask.style.display = 'none'; });
+
+document.getElementById('btnConfirmPwd').onclick = async () => {
+  const oldPwd = document.getElementById('oldPwd').value;
+  const newPwd1 = document.getElementById('newPwd1').value;
+  const newPwd2 = document.getElementById('newPwd2').value;
+  const errEl = document.getElementById('pwdErr');
+  errEl.style.display = 'none';
+  if (!oldPwd) { errEl.textContent = '请输入原始密码'; errEl.style.display = 'block'; return; }
+  if (newPwd1.length < 4) { errEl.textContent = '新密码至少4位'; errEl.style.display = 'block'; return; }
+  if (newPwd1 !== newPwd2) { errEl.textContent = '两次输入的新密码不一致'; errEl.style.display = 'block'; return; }
+  try {
+    await API.post('/api/classes/change-password', {
+      class_id: classId, old_password: oldPwd, new_password: newPwd1
+    });
+    alert('密码修改成功，请用新密码登录');
+    mask.style.display = 'none';
+  } catch (e) {
+    errEl.textContent = e.message; errEl.style.display = 'block';
+  }
+};
+</script>
+</body>
+</html>

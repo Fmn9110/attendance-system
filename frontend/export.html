@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>导出 Excel</title>
+<link rel="stylesheet" href="/css/base.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="title">导出点名数据</div>
+  <div class="sub">按日期范围或选择场次导出</div>
+</div>
+<div class="offline-bar"></div>
+<div class="container">
+  <div class="card">
+    <div class="label">按日期范围导出</div>
+    <div class="row">
+      <input type="date" id="from">
+      <input type="date" id="to">
+    </div>
+    <button class="btn btn-primary btn-block mt" id="btnDateExport">按日期导出</button>
+  </div>
+  <div class="card">
+    <div class="label">选择场次（可多选）</div>
+    <div id="sessions" style="max-height:400px;overflow:auto;">加载中…</div>
+    <button class="btn btn-success btn-block mt" id="btnSelExport">导出所选场次</button>
+  </div>
+  <a class="muted" href="/attendance.html?class_id=" id="back">← 返回点名页</a>
+</div>
+<script src="/js/api.js?v=2"></script>
+<script src="/js/storage.js?v=2"></script>
+<script>
+const classId = parseInt(new URLSearchParams(location.search).get('class_id') || '0');
+document.getElementById('back').href = `/attendance.html?class_id=${classId}`;
+
+async function loadSessions() {
+  const r = await API.get(`/api/classes/${classId}/attendance/sessions`);
+  const box = document.getElementById('sessions');
+  if (!r.data || !r.data.length) { box.innerHTML = '<div class="muted">暂无历史记录</div>'; return; }
+  box.innerHTML = '';
+  r.data.forEach(s => {
+    const d = s.started_at ? new Date(s.started_at) : new Date(s.created_at);
+    const label = `${d.toLocaleString('zh-CN')}  共${s.summary.total}人(已到${s.summary.present})`;
+    const div = document.createElement('label');
+    div.style.cssText = 'display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:14px;';
+    div.innerHTML = `<input type="checkbox" value="${s.session_id}" style="width:auto;"> <span>${label}</span>`;
+    box.appendChild(div);
+  });
+}
+
+function download(url, params) {
+  const token = API.getToken();
+  const qs = new URLSearchParams(params || {});
+  qs.set('token', token);
+  location.href = url + '?' + qs.toString();
+}
+
+document.getElementById('btnDateExport').onclick = () => {
+  const from = document.getElementById('from').value;
+  const to = document.getElementById('to').value;
+  if (!from && !to) { alert('请选择日期范围'); return; }
+  download(`/api/classes/${classId}/attendance/export`, { date_from: from, date_to: to });
+};
+document.getElementById('btnSelExport').onclick = () => {
+  const ids = Array.from(document.querySelectorAll('#sessions input:checked')).map(x => x.value);
+  if (!ids.length) { alert('请至少选择一个场次'); return; }
+  download(`/api/classes/${classId}/attendance/export`, { session_ids: ids.join(',') });
+};
+
+loadSessions().catch(e => { document.getElementById('sessions').innerHTML = e.message; });
+</script>
+</body>
+</html>

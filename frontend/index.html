@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>班级点名系统</title>
+<link rel="stylesheet" href="/css/base.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="title">班级点名系统</div>
+  <div class="sub">请选择班级进入</div>
+</div>
+<div class="offline-bar"></div>
+<div class="container" id="list" style="padding-top:20px;">
+  <div class="card">加载中…</div>
+</div>
+<script src="/js/api.js?v=2"></script>
+<script src="/js/storage.js?v=2"></script>
+<script>
+(async () => {
+  const box = document.getElementById('list');
+  try {
+    const r = await API.get('/api/classes');
+    if (!r.data || !r.data.length) {
+      box.innerHTML = '<div class="alert alert-warn">暂无班级，请联系管理员初始化。</div>';
+      return;
+    }
+    box.innerHTML = '';
+    for (const c of r.data) {
+      const a = document.createElement('a');
+      a.className = 'card';
+      a.style.cssText = 'display:block;color:inherit;margin-bottom:10px;';
+      a.href = '/login.html?class_id=' + c.id;
+      a.innerHTML = `<div style="font-size:18px;font-weight:600;">${c.class_name}</div>
+                     <div class="muted mt">点击输入密码进入 →</div>`;
+      box.appendChild(a);
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="alert alert-error">加载失败：${e.message}</div>`;
+  }
+})();
+</script>
+</body>
+</html>

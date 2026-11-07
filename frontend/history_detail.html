@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>点名详情与修改</title>
+<link rel="stylesheet" href="/css/base.css">
+<style>
+  .student-card { background:#fff; border-radius:var(--radius); padding:12px; margin-bottom:10px; box-shadow:var(--shadow); }
+  .student-head { display:flex; justify-content:space-between; align-items:baseline; }
+  .student-num { font-family: ui-monospace, Menlo, Consolas, monospace; color:var(--c-sub); font-size:13px; white-space:nowrap; }
+  .student-name { font-size:18px; font-weight:600; white-space:nowrap; }
+  .student-phone { font-size:13px; color:var(--c-sub); margin-top:2px; }
+  .status-btns { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:10px; }
+  .sbtn { min-height:42px; border:1.5px solid var(--c-border); background:#fafafa; border-radius:8px; font-size:14px; cursor:pointer; padding:4px 2px; }
+  .sbtn.present.on { background:var(--c-present); color:#fff; border-color:var(--c-present); }
+  .sbtn.late.on { background:var(--c-late); color:#fff; border-color:var(--c-late); }
+  .sbtn.sick_leave.on { background:var(--c-sick); color:#fff; border-color:var(--c-sick); }
+  .sbtn.other.on { background:var(--c-other); color:#fff; border-color:var(--c-other); }
+  .remark-box { margin-top:8px; display:none; }
+  .remark-box.show { display:block; }
+  .remark-box textarea { font-size:14px; width:100%; box-sizing:border-box; }
+  .filter-row { display:flex; gap:6px; overflow-x:auto; padding:4px 0; margin-top:8px; }
+  .chip { flex:0 0 auto; padding:6px 12px; border-radius:16px; background:#fff; border:1px solid var(--c-border); font-size:13px; cursor:pointer; }
+  .chip.on { background:var(--c-primary); color:#fff; border-color:var(--c-primary); }
+  .toast {
+    position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
+    background: rgba(31, 35, 41, 0.9); color: #fff;
+    padding: 10px 18px; border-radius: 20px; font-size: 14px;
+    z-index: 200; opacity: 0; pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(4px); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="title">点名详情与修改</div>
+  <div class="sub" id="sub"></div>
+</div>
+<div class="offline-bar"></div>
+<div class="container" style="padding-bottom:40px;">
+  <div id="summary"></div>
+  
+  <div class="card" style="margin-bottom:12px;padding:10px 12px;">
+    <input type="search" id="search" placeholder="搜索姓名 / 学号 / 电话">
+    <div class="filter-row" id="filter">
+      <span class="chip on" data-f="all">全部</span>
+      <span class="chip" data-f="present">已到</span>
+      <span class="chip" data-f="late">迟到</span>
+      <span class="chip" data-f="sick_leave">已请假</span>
+      <span class="chip" data-f="other">其他</span>
+      <span class="chip" data-f="pending">未点名</span>
+    </div>
+  </div>
+
+  <div id="list"></div>
+  <a class="muted" href="/history.html" id="back" style="display:block;margin-top:16px;text-align:center;">← 返回历史列表</a>
+</div>
+
+<script src="/js/api.js?v=2"></script>
+<script src="/js/storage.js?v=2"></script>
+<script>
+const sid = parseInt(new URLSearchParams(location.search).get('session_id') || '0');
+let sessionData = null;
+let records = [];
+let currentFilter = 'all';
+let searchKw = '';
+
+function showToast(msg, dur = 2000) {
+  let t = document.getElementById('appToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'appToast';
+    t.className = 'toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), dur);
+}
+
+function renderSummary() {
+  const d = sessionData;
+  const s = d.summary;
+  const dur = d.started_at && d.finished_at ? Math.round((new Date(d.finished_at)-new Date(d.started_at))/1000) : 0;
+  document.getElementById('summary').innerHTML = `
+    <div class="card">
+      <div style="font-size:17px;font-weight:600;margin-bottom:8px;">${d.class_name} 历史点名</div>
+      <div style="font-size:14px;color:var(--c-sub);">开始：${d.started_at ? new Date(d.started_at).toLocaleString('zh-CN') : '-'}</div>
+      <div style="font-size:14px;color:var(--c-sub);">结束：${d.finished_at ? new Date(d.finished_at).toLocaleString('zh-CN') : '-'}</div>
+      <div style="font-size:14px;color:var(--c-sub);">耗时：${Math.floor(dur/60)}分${dur%60}秒</div>
+      <div class="mt" style="font-size:14px;line-height:1.6;">
+        共 ${s.total} ｜ 
+        已到 <b style="color:var(--c-present);">${s.present}</b> ｜ 
+        迟到 <b style="color:var(--c-late);">${s.late}</b> ｜ 
+        已请假 <b style="color:var(--c-sick);">${s.sick_leave}</b> ｜ 
+        其他 <b style="color:var(--c-other);">${s.other}</b> ｜ 
+        未点名 <b style="color:var(--c-pending);">${s.pending}</b>
+      </div>
+      <button class="btn btn-primary mt" id="exportBtn" style="width:100%;">导出本次 Excel</button>
+    </div>`;
+
+  document.getElementById('exportBtn').onclick = function() {
+    const btn = this;
+    btn.textContent = '正在下载...'; btn.disabled = true;
+    const token = API.getToken();
+    location.href = `/api/attendance/${sid}/export?token=${encodeURIComponent(token)}`;
+    setTimeout(() => { btn.textContent = '导出本次 Excel'; btn.disabled = false; }, 2000);
+  };
+}
+
+function renderList() {
+  const box = document.getElementById('list');
+  box.innerHTML = '';
+  const kw = searchKw.trim().toLowerCase();
+
+  const filtered = records.filter(rec => {
+    if (currentFilter !== 'all' && rec.status !== currentFilter) return false;
+    if (kw && !(rec.name.toLowerCase().includes(kw) || rec.student_number.toLowerCase().includes(kw) || (rec.phone||'').includes(kw))) {
+      return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    box.innerHTML = '<div class="alert alert-info">没有符合条件的学生</div>';
+    return;
+  }
+
+  filtered.forEach(rec => {
+    const card = document.createElement('div');
+    card.className = 'student-card';
+    card.innerHTML = `
+      <div class="student-head">
+        <span class="student-name">${rec.name}</span>
+        <span class="student-num">${rec.student_number}</span>
+      </div>
+      ${rec.phone ? `<div class="student-phone">电话：${rec.phone}</div>` : ''}
+      <div class="status-btns">
+        <button class="sbtn present ${rec.status==='present'?'on':''}" data-id="${rec.student_id}" data-st="present">已到</button>
+        <button class="sbtn late ${rec.status==='late'?'on':''}" data-id="${rec.student_id}" data-st="late">迟到</button>
+        <button class="sbtn sick_leave ${rec.status==='sick_leave'?'on':''}" data-id="${rec.student_id}" data-st="sick_leave">已请假</button>
+        <button class="sbtn other ${rec.status==='other'?'on':''}" data-id="${rec.student_id}" data-st="other">其他</button>
+      </div>
+      <div class="remark-box ${rec.status==='other'?'show':''}" data-rid="${rec.student_id}">
+        <textarea placeholder="请输入具体情况（如：事假/参赛等）" data-rm="${rec.student_id}">${rec.remark||''}</textarea>
+        <button class="btn btn-primary mt" data-rsave="${rec.student_id}" style="display:none;padding:6px 12px;font-size:13px;">保存备注</button>
+      </div>`;
+    box.appendChild(card);
+  });
+
+  // 绑定状态按钮切换事件
+  box.querySelectorAll('.sbtn').forEach(btn => {
+    btn.onclick = () => updateStatus(parseInt(btn.dataset.id), btn.dataset.st);
+  });
+
+  // 绑定保存备注按钮
+  box.querySelectorAll('[data-rsave]').forEach(btn => {
+    btn.onclick = () => saveRemark(parseInt(btn.dataset.rsave));
+  });
+
+  box.querySelectorAll('[data-rm]').forEach(ta => {
+    ta.addEventListener('focus', () => {
+      const btn = ta.parentElement.querySelector('[data-rsave]');
+      if (btn) btn.style.display = '';
+    });
+    ta.addEventListener('input', () => {
+      const btn = ta.parentElement.querySelector('[data-rsave]');
+      if (btn) btn.style.display = '';
+    });
+  });
+}
+
+async function updateStatus(studentId, newStatus) {
+  const rec = records.find(x => x.student_id === studentId);
+  if (!rec) return;
+  const oldStatus = rec.status;
+  if (oldStatus === newStatus && newStatus !== 'other') return;
+
+  rec.status = newStatus;
+  if (newStatus !== 'other') rec.remark = null;
+  renderList();
+
+  try {
+    const r = await API.post(`/api/attendance/${sid}/record`, {
+      student_id: studentId,
+      status: newStatus,
+      remark: newStatus === 'other' ? (rec.remark || null) : null
+    });
+    if (r.data && r.data.summary) {
+      sessionData.summary = r.data.summary;
+      renderSummary();
+    }
+    showToast(`已将 ${rec.name} 状态修改为：${getStatusName(newStatus)}`);
+  } catch (e) {
+    rec.status = oldStatus;
+    renderList();
+    showToast(e.message || '修改失败');
+  }
+}
+
+async function saveRemark(studentId) {
+  const rec = records.find(x => x.student_id === studentId);
+  const ta = document.querySelector(`[data-rm="${studentId}"]`);
+  if (!rec || !ta) return;
+  rec.remark = ta.value.trim();
+  try {
+    const r = await API.post(`/api/attendance/${sid}/record`, {
+      student_id: studentId,
+      status: 'other',
+      remark: rec.remark || null
+    });
+    if (r.data && r.data.summary) {
+      sessionData.summary = r.data.summary;
+      renderSummary();
+    }
+    const btn = ta.parentElement.querySelector('[data-rsave]');
+    if (btn) btn.style.display = 'none';
+    showToast(`已保存 ${rec.name} 备注`);
+  } catch (e) {
+    showToast(e.message || '保存备注失败');
+  }
+}
+
+function getStatusName(st) {
+  const map = { present:'已到', late:'迟到', sick_leave:'已请假', other:'其他', pending:'未点名' };
+  return map[st] || st;
+}
+
+// 搜索筛选事件
+document.getElementById('search').addEventListener('input', e => {
+  searchKw = e.target.value;
+  renderList();
+});
+
+document.getElementById('filter').querySelectorAll('.chip').forEach(c => {
+  c.onclick = () => {
+    document.querySelectorAll('#filter .chip').forEach(x => x.classList.remove('on'));
+    c.classList.add('on');
+    currentFilter = c.dataset.f;
+    renderList();
+  };
+});
+
+(async () => {
+  try {
+    const r = await API.get(`/api/attendance/${sid}`);
+    sessionData = r.data;
+    records = sessionData.records || [];
+    document.title = `${sessionData.class_name} 点名详情与修改`;
+    document.getElementById('sub').textContent = `${sessionData.class_name} (可直接点击状态修改)`;
+    document.getElementById('back').href = `/history.html?class_id=${sessionData.class_id}`;
+    renderSummary();
+    renderList();
+  } catch (e) {
+    document.getElementById('list').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+})();
+</script>
+</body>
+</html>

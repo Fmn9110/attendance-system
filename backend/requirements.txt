@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+bcrypt
+itsdangerous
+python-multipart
+openpyxl
+xlrd
+python-dotenv
